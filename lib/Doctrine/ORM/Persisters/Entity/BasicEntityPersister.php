@@ -1821,8 +1821,9 @@ class BasicEntityPersister implements EntityPersister
                 continue; // skip null values.
             }
 
-            $types  = array_merge($types, $this->getTypes($field, $value, $this->class));
-            $params = array_merge($params, $this->getValues($value));
+            $valueTypes = $this->getTypes($field, $value, $this->class);
+            $types  = array_merge($types, $valueTypes);
+            $params = array_merge($params, $this->getValues($value, $valueTypes));
         }
 
         return array($params, $types);
@@ -1899,7 +1900,11 @@ class BasicEntityPersister implements EntityPersister
                 break;
         }
 
-        if (is_array($value)) {
+        if (count($types) > 1) {
+            if (!(is_array($value) && (count($value) === count($types)))) {
+                throw Query\QueryException::parameterTypeMismatch();
+            }
+        } elseif (is_array($value)) {
             return array_map(
                 function ($type) {
                     return Type::getType($type)->getBindingType() + Connection::ARRAY_PARAM_OFFSET;
@@ -1918,32 +1923,44 @@ class BasicEntityPersister implements EntityPersister
      *
      * @return array
      */
-    private function getValues($value)
+    private function getValues($value, $valueTypes = null)
     {
-        if (is_array($value)) {
-            $newValue = array();
-
-            foreach ($value as $itemValue) {
-                $newValue = array_merge($newValue, $this->getValues($itemValue));
+        if (is_array($valueTypes) && count($valueTypes) > 1) {
+            if (!(is_array($value) && (count($value) === count($valueTypes)))) {
+                throw Query\QueryException::parameterTypeMismatch();
             }
-
-            return array($newValue);
-        }
-
-        if (is_object($value) && $this->em->getMetadataFactory()->hasMetadataFor(ClassUtils::getClass($value))) {
-            $class = $this->em->getClassMetadata(get_class($value));
-            if ($class->isIdentifierComposite) {
+            $values = [];
+            foreach ($valueTypes as $valueType) {
+                $typeValue = array_shift($value);
+                $values = array_merge($values, $this->getValues($typeValue, $valueType));
+            }
+            return $values;
+        } else {
+            if (is_array($value)) {
                 $newValue = array();
 
-                foreach ($class->getIdentifierValues($value) as $innerValue) {
-                    $newValue = array_merge($newValue, $this->getValues($innerValue));
+                foreach ($value as $itemValue) {
+                    $newValue = array_merge($newValue, $this->getValues($itemValue));
                 }
 
-                return $newValue;
+                return array($newValue);
             }
-        }
 
-        return array($this->getIndividualValue($value));
+            if (is_object($value) && $this->em->getMetadataFactory()->hasMetadataFor(ClassUtils::getClass($value))) {
+                $class = $this->em->getClassMetadata(get_class($value));
+                if ($class->isIdentifierComposite) {
+                    $newValue = array();
+
+                    foreach ($class->getIdentifierValues($value) as $innerValue) {
+                        $newValue = array_merge($newValue, $this->getValues($innerValue));
+                    }
+
+                    return $newValue;
+                }
+            }
+
+            return array($this->getIndividualValue($value));
+        }
     }
 
     /**

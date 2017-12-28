@@ -2930,15 +2930,38 @@ class UnitOfWork implements PropertyChangedListener
     {
         $class = $this->em->getClassMetadata(get_class($entity));
 
-        if ($class->isIdentifierComposite) {
-            throw ORMInvalidArgumentException::invalidCompositeIdentifier();
-        }
-
         $values = $this->isInIdentityMap($entity)
             ? $this->getEntityIdentifier($entity)
             : $class->getIdentifierValues($entity);
 
-        return isset($values[$class->identifier[0]]) ? $values[$class->identifier[0]] : null;
+        if ($class->isIdentifierComposite) {
+            // @todo: return values or imploded values string?
+            return $values;
+        } else {
+            return isset($values[$class->identifier[0]]) ? $values[$class->identifier[0]] : null;
+        }
+    }
+
+    /**
+     * @param $id
+     *
+     * @return string
+     */
+    private function getIdHash($id)
+    {
+        $idHash = $id;
+
+        if (is_array($id)) {
+            $idHash = '';
+            $sep = '';
+            foreach ($id as $key => $value)
+            {
+                $idHash .= $sep . $this->getIdHash($value);
+                $sep = ' ';
+            }
+        }
+
+        return $idHash;
     }
 
     /**
@@ -2953,7 +2976,8 @@ class UnitOfWork implements PropertyChangedListener
      */
     public function tryGetById($id, $rootClassName)
     {
-        $idHash = implode(' ', (array) $id);
+        // $idHash = implode(' ', (array) $id);
+        $idHash = $this->getIdHash($id);
 
         if (isset($this->identityMap[$rootClassName][$idHash])) {
             return $this->identityMap[$rootClassName][$idHash];
